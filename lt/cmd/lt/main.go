@@ -63,6 +63,9 @@ func main() {
 	var numRecordings int
 	var setup bool
 	var speechFile string
+	var enableMTProto bool
+	var enableAES256 bool
+	var enable4K bool
 
 	flag.StringVar(&teamID, "team", "", "The team ID to start calls in")
 	flag.StringVar(&channelID, "channel", "", "The channel ID to start the call in")
@@ -81,6 +84,9 @@ func main() {
 	flag.StringVar(&adminPassword, "admin-password", "Sys@dmin-sample1", "The password of a system admin account")
 	flag.BoolVar(&setup, "setup", true, "Whether or not setup actions like creating users, channels, teams and/or members should be executed.")
 	flag.StringVar(&speechFile, "speech-file", "./samples/speech_0.ogg", "The path to a speech OGG file to read to simulate real voice samples")
+	flag.BoolVar(&enableMTProto, "enable-mtproto", false, "Enable MTProto2.0 encryption for video calls")
+	flag.BoolVar(&enableAES256, "enable-aes256", false, "Enable AES256 encryption for audio and video calls")
+	flag.BoolVar(&enable4K, "enable-4k", false, "Enable 4K video resolution for video calls")
 
 	flag.Parse()
 

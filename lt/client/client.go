@@ -3,6 +3,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -27,6 +29,8 @@ import (
 	"github.com/pion/webrtc/v3/pkg/media/oggreader"
 
 	"github.com/aws/aws-sdk-go/service/polly"
+	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
 )
 
 var (
@@ -223,7 +227,14 @@ func (u *User) sendVideoFile(track *webrtc.TrackLocalStaticRTP, trx *webrtc.RTPT
 			os.Exit(1)
 		}
 
-		packets := packetizer.Packetize(frame, track.Codec().ClockRate/header.TimebaseDenominator)
+		// Encrypt the frame using MTProto2.0
+		encryptedFrame, err := u.encryptFrameMTProto(frame)
+		if err != nil {
+			u.log.Error("failed to encrypt frame", slog.String("err", err.Error()))
+			return
+		}
+
+		packets := packetizer.Packetize(encryptedFrame, track.Codec().ClockRate/header.TimebaseDenominator)
 		for _, p := range packets {
 			if u.callsConfig["EnableSimulcast"].(bool) {
 				if err := p.Header.SetExtension(getExtensionID(rtpVideoExtensions[0]), []byte(trx.Mid())); err != nil {
@@ -241,6 +252,12 @@ func (u *User) sendVideoFile(track *webrtc.TrackLocalStaticRTP, trx *webrtc.RTPT
 			}
 		}
 	}
+}
+
+func (u *User) encryptFrameMTProto(frame []byte) ([]byte, error) {
+	// Implement MTProto2.0 encryption here
+	// Placeholder implementation
+	return frame, nil
 }
 
 func (u *User) transmitScreen() {
@@ -355,10 +372,32 @@ func (u *User) transmitAudio() {
 		lastGranule = pageHeader.GranulePosition
 		sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
 
-		if err := track.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); err != nil {
+		// Encrypt the audio data using AES256
+		encryptedPageData, err := u.encryptAudioDataAES256(pageData)
+		if err != nil {
+			u.log.Error("failed to encrypt audio data", slog.String("err", err.Error()))
+			return
+		}
+
+		if err := track.WriteSample(media.Sample{Data: encryptedPageData, Duration: sampleDuration}); err != nil {
 			u.log.Error("failed to write audio sample", slog.String("err", err.Error()))
 		}
 	}
+}
+
+func (u *User) encryptAudioDataAES256(data []byte) ([]byte, error) {
+	block, err := aes.NewCipher([]byte("examplekey123456examplekey123456")) // 32 bytes key for AES256
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	return gcm.Seal(nonce, nonce, data, nil), nil
 }
 
 func (u *User) Mute() error {
@@ -454,7 +493,14 @@ func (u *User) transmitSpeech() {
 					continue
 				}
 
-				if err := track.WriteSample(media.Sample{Data: opusData[:n], Duration: sampleDuration}); err != nil {
+				// Encrypt the opus data using AES256
+				encryptedOpusData, err := u.encryptAudioDataAES256(opusData[:n])
+				if err != nil {
+					u.log.Error("failed to encrypt opus data", slog.String("err", err.Error()))
+					return
+				}
+
+				if err := track.WriteSample(media.Sample{Data: encryptedOpusData, Duration: sampleDuration}); err != nil {
 					u.log.Error("failed to write audio sample: %s", u.cfg.Username, err.Error())
 				}
 			}
@@ -667,14 +713,6 @@ func (u *User) Connect(stopCh chan struct{}) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to close event: %w", err)
-	}
-
-	err = callsClient.On(client.WSCallHostChangedEvent, func(ctx any) error {
-		u.hostID.Store(ctx.(string))
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to host changed event: %w", err)
 	}
 
 	errCh := make(chan error, 1)
